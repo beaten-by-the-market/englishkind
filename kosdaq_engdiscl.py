@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime, timedelta
 import time
-import mysql.connector
 
 # 페이지 설정 (wide 모드로 설정)
 st.set_page_config(
@@ -18,356 +17,54 @@ st.set_page_config(
 st.title('오늘의 코스닥 번역대상 공시')
 
 #-----------------------------------------------------------
-# 환경변수 설정-streamlit
+# CSV 파일에서 데이터 로드
 #-----------------------------------------------------------
-db_config = {
-    'user': st.secrets["general"]["db_user"],
-    'password': st.secrets["general"]["db_password"],
-    'host': st.secrets["general"]["db_host"],
-    'port': st.secrets["general"]["db_port"],
-    'database': st.secrets["general"]["db_name"],
-}
 
-# 데이터사용
-def load_data_from_db():
-    connection = None
+# 공시서식 데이터 로드 함수
+@st.cache_data
+def load_kosdaq_format_data():
     try:
-        # 데이터베이스 연결
-        connection = mysql.connector.connect(**db_config)
+        df = pd.read_csv("kosdaq_format.csv", dtype=str)
+        return df
+    except Exception as e:
+        st.error(f"공시서식 데이터 로드 오류: {e}")
+        return pd.DataFrame()
 
-        if connection.is_connected():
-            print("Connected to MySQL database")
-
-            # 커서 생성
-            cursor = connection.cursor()
-
-            # 데이터 가져오기
-            query = "SELECT * FROM kosdaq_report"
-            cursor.execute(query)
-
-            # 데이터프레임 초기화
-            disc = pd.DataFrame(columns=[desc[0] for desc in cursor.description])
-
-            # 배치로 데이터를 가져오는 로직 (이 부분은 그대로 유지)
-            batch_size = 1000  # 한 번에 가져올 행의 수
-            rows_fetched = 0
-
-            while True:
-                rows = cursor.fetchmany(batch_size)
-                if not rows:
-                    break
-                disc = pd.concat([disc, pd.DataFrame(rows, columns=disc.columns)], ignore_index=True)
-
-                rows_fetched += len(rows)
-
-            return disc
-
-    except mysql.connector.Error as e:
-        st.error(f"Error: {e}")
-        return pd.DataFrame()  # 빈 데이터프레임 반환
-
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-            print("MySQL connection is closed")
-
-# SQL 데이터를 최초 1회만 로드
-# 지원대상 데이터 리스트 (df_data 정의)
-df_data = load_data_from_db()
-
-# 컬럼명 설정
-df_data.columns = ["서식코드", "서식명", "대분류", "구분", "업데이트일"]
-
-# DataFrame 설정
-df_svc = df_data
-
-# 데이터사용
-def load_data_from_db_name():
-    connection = None
+# 회사 데이터 로드 함수
+@st.cache_data
+def load_kosdaq_company_data():
     try:
-        # 데이터베이스 연결
-        connection = mysql.connector.connect(**db_config)
+        df = pd.read_csv("kosdaq_company.csv", dtype=str)
+        return df
+    except Exception as e:
+        st.error(f"회사 데이터 로드 오류: {e}")
+        return pd.DataFrame()
 
-        if connection.is_connected():
-            print("Connected to MySQL database")
+# 데이터 로드
+df_svc = load_kosdaq_format_data()
+df_listed = load_kosdaq_company_data()
+df_listed['회사코드'] = df_listed['회사코드'].astype(str).str.zfill(5)
 
-            # 커서 생성
-            cursor = connection.cursor()
-
-            # 데이터 가져오기
-            query = "SELECT * FROM kosdaq_companies"
-            cursor.execute(query)
-
-            # 데이터프레임 초기화
-            disc = pd.DataFrame(columns=[desc[0] for desc in cursor.description])
-
-            # 배치로 데이터를 가져오는 로직 (이 부분은 그대로 유지)
-            batch_size = 1000  # 한 번에 가져올 행의 수
-            rows_fetched = 0
-
-            while True:
-                rows = cursor.fetchmany(batch_size)
-                if not rows:
-                    break
-                disc = pd.concat([disc, pd.DataFrame(rows, columns=disc.columns)], ignore_index=True)
-
-                rows_fetched += len(rows)
-
-            return disc
-
-    except mysql.connector.Error as e:
-        st.error(f"Error: {e}")
-        return pd.DataFrame()  # 빈 데이터프레임 반환
-
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-            print("MySQL connection is closed")
-
-# SQL 데이터를 최초 1회만 로드
-# 지원대상 데이터 리스트 (df_data 정의)
-df_data = load_data_from_db_name()
-
-# 컬럼명 설정
-df_data.columns = ["회사코드", "회사명", "상장여부", "업데이트일"]
-
-# DataFrame 생성
-df_listed = df_data
-
-# 세션 상태에 df_listed 저장 (초기 로드 시)
-if 'df_listed' not in st.session_state:
-    st.session_state.df_listed = df_listed.copy()
-
-# 회사 추가 콜백 함수
-def add_company():
-    if st.session_state.company_code and st.session_state.company_name:
-        # 새 행 추가
-        new_row = pd.DataFrame({
-            "회사코드": [st.session_state.company_code],
-            "회사명": [st.session_state.company_name],
-            "상장여부": ["상장"]
-        })
-        # 세션 상태의 데이터프레임에 추가
-        st.session_state.df_listed = pd.concat([st.session_state.df_listed, new_row], ignore_index=True)
-        # 입력 필드 초기화
-        st.session_state.company_code = ""
-        st.session_state.company_name = ""
-
-# 3개의 칼럼 생성
-col1, col2, col3 = st.columns(3)
-
-# 세션 상태에 df_svc 저장 (초기 로드 시)
-if 'df_svc' not in st.session_state:
-    st.session_state.df_svc = df_svc.copy()
+# 2개의 칼럼 생성 (업로드 섹션 제거)
+col1, col2 = st.columns(2)
 
 # 첫번째 칼럼: 지원대상공시서식기준
 with col1:
     st.subheader('지원대상 공시서식')
-    # 세션 상태의 df_svc를 사용
-    if 'df_svc' in st.session_state:
-        st.write(str(len(st.session_state.df_svc))+'개')
-        st.dataframe(st.session_state.df_svc)
+    if not df_svc.empty:
+        st.write(f'{len(df_svc)}개')
+        st.dataframe(df_svc, use_container_width=True)
     else:
-        st.write(str(len(df_svc))+'개')
-        st.dataframe(df_svc)
+        st.warning("공시서식 데이터를 불러올 수 없습니다.")
 
 # 두번째 칼럼: 지원대상 회사목록
 with col2:
     st.subheader('지원대상 회사 목록')
-    st.write(str(len(st.session_state.df_listed))+'사')
-    st.dataframe(st.session_state.df_listed)
-
-# 세번째 칼럼: 파일 업로드 및 DB 저장 기능
-with col3:
-    st.subheader('지원대상 서식 업로드')
-    
-    # 1. 지원대상 공시서식 업로드 섹션
-    st.markdown("##### 칼럼이 4개짜리인 엑셀파일로 올려주세요")
-    st.markdown("##### ('업데이트일'칼럼 삭제필수)")
-
-    disclosure_file = st.file_uploader("공시서식 Excel 파일 업로드", type=["xlsx", "xls"], key="disclosure_uploader")
-    
-    if disclosure_file is not None:
-        try:
-            # Excel 파일 읽기
-            df_disc = pd.read_excel(disclosure_file, dtype=str)
-            
-            # 오늘날짜 설정
-            today = (datetime.today()).strftime('%Y%m%d')
-            df_disc['update_date'] = today
-            
-            # 칼럼명 설정
-            df_disc.columns = ['서식코드', '서식명', '대분류', '구분', 'update_date']
-            
-            # 데이터 미리보기 표시
-            st.write("업로드된 공시서식 데이터:")
-            st.dataframe(df_disc)
-            
-            # 업로드 확인 버튼
-            if st.button("공시서식 임시 적용하기", key="apply_disclosure"):
-                # 세션 상태에 df_svc 업데이트
-                st.session_state.df_svc = df_disc.copy()
-                st.success("지원대상 공시서식이 임시 업데이트되었습니다.")
-                st.rerun()  # 페이지 새로고침
-                
-            # DB에 영구반영하기 버튼
-            if st.button("공시서식 DB에 영구반영하기", key="save_disclosure_to_db"):
-                try:
-                    # Create a connection to the database
-                    connection = mysql.connector.connect(**db_config)
-
-                    if connection.is_connected():
-                        st.info("MySQL 데이터베이스에 연결되었습니다.")
-
-                        # Create a cursor object to interact with the database
-                        cursor = connection.cursor()
-                        
-                        # 스키마 이용
-                        cursor.execute("USE englishkind")
-                        
-                        cursor.execute("DROP TABLE IF EXISTS kosdaq_report")
-                        
-                        # 유가 번역대상 보고서 테이블 생성
-                        cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS kosdaq_report (
-                            form_code VARCHAR(5) PRIMARY KEY,
-                            form_name VARCHAR(255) NOT NULL,
-                            form_type VARCHAR(255) NOT NULL,
-                            institution VARCHAR(255) NOT NULL,
-                            update_date VARCHAR(8) NOT NULL
-                        )
-                        """)
-                        
-                        # Insert the data from the DataFrame into the table using parameterized queries
-                        insert_query = """INSERT INTO kosdaq_report (
-                        form_code, form_name, form_type, institution, update_date) 
-                        VALUES (%s, %s, %s, %s, %s)
-                        """
-                        
-                        # Streamlit용 진행 표시줄
-                        progress_bar = st.progress(0)
-                        for i, (_, row) in enumerate(df_disc.iterrows()):
-                            row = row.fillna("-")
-                            cursor.execute(insert_query, (row['서식코드'], row['서식명'], row['대분류'], row['구분'], row['update_date']))
-                            progress_bar.progress((i + 1) / len(df_disc))
-
-                        # Commit the changes
-                        connection.commit()
-                        st.success("공시서식 데이터가 데이터베이스에 성공적으로 저장되었습니다!")
-
-                except mysql.connector.Error as e:
-                    st.error(f"오류: {e}")
-
-                finally:
-                    if connection.is_connected():
-                        cursor.close()
-                        connection.close()
-                        st.info("MySQL 연결이 종료되었습니다.")
-                
-        except Exception as e:
-            st.error(f"파일 처리 중 오류 발생: {e}")
-    
-    # 구분선 추가
-    st.markdown("---")
-    
-    # 2. 지원대상 회사 업로드 섹션
-    st.markdown("### 지원대상 회사 업로드")
-    st.markdown("##### 칼럼이 3개짜리인 엑셀파일로 올려주세요")
-    st.markdown("##### ('업데이트일'칼럼 삭제필수)")
-    
-    companies_file = st.file_uploader("회사 목록 Excel 파일 업로드", type=["xlsx", "xls"], key="companies_uploader")
-    
-    if companies_file is not None:
-        try:
-            # Excel 파일 읽기
-            df_disc = pd.read_excel(companies_file, dtype=str)
-            
-            # 회사코드 포맷팅 (5자리로 맞추고 앞에 0 채우기)
-            df_disc['회사코드'] = df_disc['회사코드'].apply(lambda x: str(x).rjust(5, '0'))
-            
-            # 오늘날짜 설정
-            today = (datetime.today()).strftime('%Y%m%d')
-            df_disc['update_date'] = today
-            
-            # 칼럼명 설정
-            df_disc.columns = ['회사코드', '회사명', '상장여부', 'update_date']
-            
-            # 데이터 미리보기 표시
-            st.write("업로드된 회사 데이터:")
-            st.dataframe(df_disc)
-            
-            # 업로드 확인 버튼
-            if st.button("회사 데이터 임시 적용하기", key="apply_companies"):
-                # 세션 상태에 df_listed 업데이트
-                st.session_state.df_listed = df_disc.copy()
-                st.success("지원대상 회사 목록이 임시 업데이트되었습니다.")
-                st.rerun()  # 페이지 새로고침
-                
-            # DB에 영구반영하기 버튼
-            if st.button("회사 데이터 DB에 영구반영하기", key="save_companies_to_db"):
-                try:
-                    # Create a connection to the database
-                    connection = mysql.connector.connect(**db_config)
-
-                    if connection.is_connected():
-                        st.info("MySQL 데이터베이스에 연결되었습니다.")
-
-                        # Create a cursor object to interact with the database
-                        cursor = connection.cursor()
-                        
-                        # 데이터베이스 이용
-                        cursor.execute("USE englishkind")
-                        
-                        cursor.execute("DROP TABLE IF EXISTS kosdaq_companies")
-                        
-                        # 유가 번역대상 보고서 테이블 생성
-                        cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS kosdaq_companies (
-                            company_code VARCHAR(5) PRIMARY KEY,
-                            company_name VARCHAR(255) NOT NULL,
-                            listed VARCHAR(255) NOT NULL,
-                            update_date VARCHAR(8) NOT NULL
-                        )
-                        """)
-                        
-                        # Insert the data from the DataFrame into the table using parameterized queries
-                        insert_query = """INSERT INTO kosdaq_companies (
-                        company_code, company_name, listed, update_date) 
-                        VALUES (%s, %s, %s, %s)
-                        """
-                        
-                        # Streamlit용 진행 표시줄
-                        progress_bar = st.progress(0)
-                        for i, (_, row) in enumerate(df_disc.iterrows()):
-                            row = row.fillna("-")
-                            cursor.execute(insert_query, (row['회사코드'], row['회사명'], row['상장여부'], row['update_date']))
-                            progress_bar.progress((i + 1) / len(df_disc))
-
-                        # Commit the changes
-                        connection.commit()
-                        st.success("회사 데이터가 데이터베이스에 성공적으로 저장되었습니다!")
-
-                except mysql.connector.Error as e:
-                    st.error(f"오류: {e}")
-
-                finally:
-                    if connection.is_connected():
-                        cursor.close()
-                        connection.close()
-                        st.info("MySQL 연결이 종료되었습니다.")
-                
-        except Exception as e:
-            st.error(f"파일 처리 중 오류 발생: {e}")
-
-    
-
-
-
-# 필터링에 사용될 df_listed 업데이트
-df_svc = st.session_state.df_svc
-df_listed = st.session_state.df_listed
+    if not df_listed.empty:
+        st.write(f'{len(df_listed)}사')
+        st.dataframe(df_listed, use_container_width=True)
+    else:
+        st.warning("회사 목록 데이터를 불러올 수 없습니다.")
 
 # 날짜 계산 함수
 def get_default_date():
@@ -392,6 +89,11 @@ today_date = selected_date.strftime("%Y-%m-%d")
         
 # 버튼 생성
 if st.button('코스닥 영문공시 지원대상 공시조회'):
+    # 데이터가 로드되었는지 확인
+    if df_svc.empty or df_listed.empty:
+        st.error("필요한 데이터를 불러올 수 없습니다. CSV 파일을 확인해주세요.")
+        st.stop()
+    
     # 로딩 표시
     with st.spinner('데이터를 가져오는 중입니다...'):
         
@@ -407,7 +109,7 @@ if st.button('코스닥 영문공시 지원대상 공시조회'):
                 "pageIndex": page_num,
                 "orderMode": 0,
                 "orderStat": "D",
-                "marketType": 2,
+                "marketType": 2,  # 코스닥은 2
                 "forward": "todaydisclosure_sub",
                 "searchMode": "",
                 "searchCodeType": "",
@@ -494,7 +196,7 @@ if st.button('코스닥 영문공시 지원대상 공시조회'):
             "pageIndex": 1,
             "orderMode": 0,
             "orderStat": "D",
-            "marketType": 1,
+            "marketType": 2,  # 코스닥은 2 (원래 코드에서 1로 잘못 설정되어 있었음)
             "forward": "todaydisclosure_sub",
             "searchMode": "",
             "searchCodeType": "",
@@ -578,5 +280,14 @@ if st.button('코스닥 영문공시 지원대상 공시조회'):
                 column_config={
                     "상세URL": st.column_config.LinkColumn("상세URL"),
                 },
-                hide_index=True
+                hide_index=True,
+                use_container_width=True
             )
+
+# 데이터 새로고침 버튼 (선택사항)
+st.sidebar.markdown("---")
+if st.sidebar.button("📊 데이터 새로고침"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.info("💡 CSV 파일에서 데이터를 불러옵니다.")

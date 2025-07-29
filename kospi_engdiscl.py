@@ -24,8 +24,7 @@ st.title('오늘의 코스피 번역대상 공시')
 @st.cache_data
 def load_kospi_format_data():
     try:
-        url = "https://raw.githubusercontent.com/beaten-by-the-market/englishkind/main/kospi_format.csv"
-        df = pd.read_csv(url, dtype=str)
+        df = pd.read_csv("kospi_format.csv", dtype=str)
         return df
     except Exception as e:
         st.error(f"공시서식 데이터 로드 오류: {e}")
@@ -35,31 +34,17 @@ def load_kospi_format_data():
 @st.cache_data
 def load_kospi_company_data():
     try:
-        url = "https://raw.githubusercontent.com/beaten-by-the-market/englishkind/main/kospi_company.csv"
-        df = pd.read_csv(url, dtype=str)
+        df = pd.read_csv("kospi_company.csv", dtype=str)
         return df
     except Exception as e:
         st.error(f"회사 데이터 로드 오류: {e}")
         return pd.DataFrame()
+ 
 
 # 데이터 로드
 df_svc = load_kospi_format_data()
 df_listed = load_kospi_company_data()
-
-# 컬럼명 확인 및 설정 (CSV 파일의 실제 컬럼명에 맞게 조정 필요)
-if not df_svc.empty:
-    # CSV 파일의 실제 컬럼명에 따라 조정하세요
-    # 예상 컬럼: form_code, form_name, form_type, institution
-    expected_cols_svc = ["서식코드", "서식명", "대분류", "구분"]
-    if len(df_svc.columns) >= 4:
-        df_svc.columns = expected_cols_svc[:len(df_svc.columns)]
-
-if not df_listed.empty:
-    # CSV 파일의 실제 컬럼명에 따라 조정하세요
-    # 예상 컬럼: company_code, company_name, listed
-    expected_cols_listed = ["회사코드", "회사명", "상장여부"]
-    if len(df_listed.columns) >= 3:
-        df_listed.columns = expected_cols_listed[:len(df_listed.columns)]
+df_listed['회사코드'] = df_listed['회사코드'].astype(str).str.zfill(5)
 
 # 2개의 칼럼 생성 (업로드 섹션 제거)
 col1, col2 = st.columns(2)
