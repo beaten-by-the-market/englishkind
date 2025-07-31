@@ -253,12 +253,19 @@ if st.button('코스닥 영문공시 지원대상 공시조회'):
         # 필터링 (지원 대상 서식만 필터)
         form_names = df_svc['서식명'].unique().tolist()
         
+        # 추가상장이나 변경상장은 제외
         def is_contained(title):
+            # 제목이 None 또는 빈 문자열인 경우 제외
+            if not title:
+                return False
+            # '추가상장'이나 '변경상장'으로 시작하면 제외
+            if title.startswith("추가상장") or title.startswith("변경상장"):
+                return False
+            # 그 외엔 form_names가 포함된 경우만 True
             for form_name in form_names:
                 if form_name in title:
                     return True
             return False
-        
         # 첫 번째 필터링: 지원 대상 서식만 필터
         filtered_df = df_discl[df_discl['공시제목'].apply(is_contained)]
         
